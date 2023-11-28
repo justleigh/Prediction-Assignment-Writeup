@@ -1,0 +1,205 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Leigh Pearson"
+date: "2023-11-25"
+output:
+  html_document: default
+  md_document:
+    variant: markdown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+For this project, I developed a predictive model to determine the manner in which exercises were performed using data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. My approach involved comprehensive data cleaning and preprocessing to handle missing values and ensure data integrity. I employed a Random Forest algorithm, leveraging its robustness in handling large datasets with multiple predictors. The model demonstrated high accuracy and was fine-tuned using cross-validation techniques, ensuring reliability in its predictive capabilities. The final model was tested against a separate dataset of 20 cases, predicting the exercise technique being used. The entire analysis, along with the model and its predictions, have been thoroughly documented and are available in a GitHub repository, showcasing both the methodology and the results in a comprehensible and accessible manner.
+
+## Downloading and Cleaning the Data 
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+install.packages("dplyr")
+
+install.packages("tidyr")
+
+install.packages("ggplot2")
+
+```{r, message=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+training_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training_data <- read.csv(training_url)
+testing_data <- read.csv(testing_url)
+```
+
+Initial exploration reveals many columns with 19216 out of 19622 values missing, which is a very high percentage, and typically, such columns are not useful for predictive modeling or statistical analysis because they contain very little information. Therefore, I will remove these columns from both the training and testing datasets.
+
+```{r}
+threshold <- 0.5  # 50% missing values
+training_data <- training_data[, colMeans(is.na(training_data)) < threshold]
+```
+
+There are also many variables with a very high percentage of empty strings, such as kurtosis_roll_belt, kurtosis_picth_belt, kurtosis_yaw_belt, and skewness_roll_belt. These were also identified and removed.
+
+```{r}
+# Calculate the proportion of empty strings in each column
+empty_string_proportions <- sapply(training_data, function(x) {
+  if(is.character(x)) {
+    return(sum(x == "") / length(x))
+  } else {
+    return(0)
+  }
+})
+
+# Set a threshold for high proportion
+threshold <- 0.5  # 50% empty strings
+
+# Identify columns exceeding the threshold
+columns_to_remove <- names(which(empty_string_proportions > threshold))
+
+# Remove these columns from the dataset
+training_data <- training_data[, !names(training_data) %in% columns_to_remove]
+```
+
+In addition, many of the variables are not relevant to the analysis, such as the X, user_name, all timestamps, and window variables, so these were also removed.
+
+```{r}
+training_data <- training_data %>%
+  select(
+    -X,
+    -user_name,
+    -raw_timestamp_part_1,
+    -raw_timestamp_part_2,
+    -cvtd_timestamp,
+    -new_window,
+    -num_window
+  )
+```
+
+Now that irrelevant and unhelpful variables have been removed, the same will be removed from the testing data. However, the Classe variable from the testing_data is missing as this is the variable that we must predict, so this will also be accounted for.
+
+```{r}
+training_vars <- setdiff(names(training_data), "classe")
+testing_data_clean <- testing_data[, training_vars, drop = FALSE]
+```
+
+It also appears that the the Classe variable factors are labeled as A, B, C, D, and E, but these need renaming in both the training and testing datasets to make analysis more interpretable.
+
+```{r}
+training_data$classe <- factor(training_data$classe,
+                               levels = c("A", "B", "C", "D", "E"),
+                               labels = c("Correct", "ElbowThrow", "HalfLift", "HalfLower", "HipThrow"))
+```
+
+## Exploratory Data Analysis
+
+A summary of the cleaned data is availbale in the Appendix. Next, we need an understanding of the distribution of the target variable classe.
+
+```{r}
+library(ggplot2)
+ggplot(training_data, aes(x = classe)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Distribution of Exercise Classes", x = "Classe", y = "Count")
+```
+
+Initial exploratory data analysis such as the histograpm below did not reveal any obvious outliers or differences.
+
+```{r, message=FALSE}
+library(tidyverse)
+
+# Reshape the data to long format, keeping 'classe' separate
+belt_data_long <- training_data %>%
+  pivot_longer(
+    cols = -classe, # Exclude 'classe' from the pivoting process
+    names_to = "measurement",
+    values_to = "value"
+  ) %>%
+  filter(str_detect(measurement, "belt")) # Keep only belt-related measurements
+
+# Plot
+belt_plots <- ggplot(belt_data_long, aes(x = value, fill = classe)) +
+  geom_histogram(bins = 30, alpha = 0.7) +
+  facet_wrap(~ measurement, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Measurement Value", y = "Count", fill = "Classe") +
+  theme(legend.position = "bottom")
+
+# Print the plots
+print(belt_plots)
+```
+
+As a result, I decided to go straight to Random Forest model building as this method is better able to deal with the large number of variables. In addition, we will perform 10-fold cross-validation. After running this, we will inspect rf_model to see the results, including the accuracy and Kappa statistics for each fold, and the overall aggregated performance.
+
+```{r, message=FALSE}
+library(randomForest)
+library(caret)
+
+set.seed(123) # for reproducibility
+rf_model <- randomForest(classe ~ ., data=training_data, ntree=500)
+
+set.seed(123)
+train_control <- trainControl(method="cv", number=10) # 10-fold CV
+rf_cv_model <- train(classe ~ ., data=training_data, method="rf", trControl=train_control, ntree=500)
+
+rf_cv_model$results
+```
+
+## Cross Validation and Out-of-Sample Error
+
+The results of the rf_cv_model cross-validation test reveals 27 random samples to be the optimal number, with the highest accuracy and Kappa scores. The final model can therefore be adjusted to include mtry 27 as follows:
+
+```{r}
+rf_model_optimized <- randomForest(
+    classe ~ ., 
+    data = training_data, 
+    ntree = 500, 
+    mtry = 27
+)
+print(rf_model_optimized)
+```
+
+The optimized model also shows an out-of-bag (OOB) error rate of just 0.48%. This extremely low estimation of out-of-sample error rate, indicating that the model should be robust and reliable when applied to mew data.
+
+## Model Testing
+
+Before we attempt to make predictions on the testing data using the optimized model, we need to make the training and testing dataset variables consistent for the model to work.
+
+```{r}
+# Get the names of the variables in the training data, excluding 'classe'
+training_vars <- setdiff(names(training_data), "classe")
+
+# Subset the testing data to include only those variables present in the training data
+testing_data_clean <- testing_data[, training_vars, drop = FALSE]
+```
+
+Now we can use the optimized model on each of the 20 test cases.
+
+```{r}
+predicted_classes <- predict(rf_model_optimized, newdata = testing_data_clean)
+print(predicted_classes)
+```
+
+These results more easily interpreted in a bar chart.
+
+```{r}
+predictions_df <- data.frame(Classe = predicted_classes)
+ggplot(predictions_df, aes(x = Classe)) + geom_bar(color = "darkgrey", fill = "darkgrey") + theme_minimal() + labs(title = "Prediction Results", x = "Predicted Classe", y = "Count")
+```
+
+## Appendix
+
+```{r}
+head(training_data)
+summary(training_data)
+str(training_data)
+dim(training_data)
+table(training_data$classe)
+str(testing_data)
+dim(testing_data)
+```
+
