@@ -101,10 +101,12 @@ A summary of the cleaned data is availbale in the Appendix. Next, we need an und
 
 ```{r}
 library(ggplot2)
-ggplot(training_data, aes(x = classe)) +
+distribution_of_exercise_classes_plot <- ggplot(training_data, aes(x = classe)) +
   geom_bar() +
   theme_minimal() +
   labs(title = "Distribution of Exercise Classes", x = "Classe", y = "Count")
+print(distribution_of_exercise_classes_plot)  
+ggsave("distribution_of_exercise_classes.png", plot = distribution_of_exercise_classes_plot, width = 10, height = 6, dpi = 300)
 ```
 
 Initial exploratory data analysis such as the histograpm below did not reveal any obvious outliers or differences.
@@ -131,6 +133,7 @@ belt_plots <- ggplot(belt_data_long, aes(x = value, fill = classe)) +
 
 # Print the plots
 print(belt_plots)
+ggsave("belt_plots.png", plot = belt_plots, width = 10, height = 8, dpi = 300)
 ```
 
 As a result, I decided to go straight to Random Forest model building as this method is better able to deal with the large number of variables. In addition, we will perform 10-fold cross-validation. After running this, we will inspect rf_model to see the results, including the accuracy and Kappa statistics for each fold, and the overall aggregated performance.
@@ -184,11 +187,16 @@ predicted_classes <- predict(rf_model_optimized, newdata = testing_data_clean)
 print(predicted_classes)
 ```
 
-These results more easily interpreted in a bar chart.
+These results are more easily interpreted in a bar chart.
 
 ```{r}
 predictions_df <- data.frame(Classe = predicted_classes)
-ggplot(predictions_df, aes(x = Classe)) + geom_bar(color = "darkgrey", fill = "darkgrey") + theme_minimal() + labs(title = "Prediction Results", x = "Predicted Classe", y = "Count")
+predictions_plot <- ggplot(predictions_df, aes(x = Classe)) + 
+  geom_bar(color = "darkgrey", fill = "darkgrey") + 
+  theme_minimal() + 
+  labs(title = "Prediction Results", x = "Predicted Classe", y = "Count")
+print(predictions_plot)
+ggsave("predictions_df.png", plot = predictions_plot, width = 10, height = 6, dpi = 300)
 ```
 
 ## Appendix
